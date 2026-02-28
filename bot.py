@@ -6,6 +6,7 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 from keep_alive import keep_alive
+import requests
 
 # Load environment variables from .env file
 load_dotenv()
@@ -145,6 +146,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         error_msg = f"❌ Error aagaya: {str(e)}\n\nShayad API limit cross ho gayi ya network issue hai."
         await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=processing_msg.message_id, text=error_msg)
 
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    webhook_url = os.getenv("MAKE_WEBHOOK_URL")
+    if not webhook_url:
+        await update.message.reply_text("⚙️ System Error: Make.com ka Webhook URL backend/Render me set nahi hai!")
+        return
+        
+    processing_msg = await update.message.reply_text("🔄 Video Pakad Li Gayi! Ise Make.com (Auto Uploader) par bhej raha hu... Please wait.")
+    
+    try:
+        # Check if it's a video or document
+        video_file = update.message.video or update.message.document
+        
+        # Get actual file download link from telegram servers
+        file = await context.bot.get_file(video_file.file_id)
+        video_download_url = file.file_path
+        
+        # User caption
+        caption = update.message.caption or ""
+        
+        data = {
+            "video_url": video_download_url,
+            "caption": caption
+        }
+        
+        # Send data to Make.com
+        response = requests.post(webhook_url, json=data)
+        
+        if response.status_code == 200:
+            await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=processing_msg.message_id, 
+                text="✅ **SUCCESS!** Aapki video autoupload ke liye engine me daal di gayi hai. Wo jaldi hi sabhi platform pe dikhne lagegi!")
+        else:
+            await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=processing_msg.message_id, 
+                text=f"❌ Arey baap re! Make.com ne lene se mana kar diya. Status: {response.status_code}")
+                
+    except Exception as e:
+        await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=processing_msg.message_id, 
+            text=f"❌ Video transfer me error: {str(e)}")
+
 def main() -> None:
     keep_alive()  # Start the background web server
     print("Bot ko start kiya jaa raha hai...")
@@ -155,6 +194,7 @@ def main() -> None:
         # Add Handlers
         app.add_handler(CommandHandler("start", start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        app.add_handler(MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_video))
         
         print("System Online! Bot ab chal raha hai! Telegram par jaake messages bhejiye.")
         app.run_polling()
